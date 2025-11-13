@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>📈 포트폴리오 백테스트</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
+    
+    <style>
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
+            margin: 2em; 
+            background-color: #f9f9f9; 
+        }
+        h1, h2 { color: #333; }
+        /* ⭐️ [신규] 차트 컨테이너 공통 스타일 */
+        .chart-container {
+            max-width: 1000px; 
+            background-color: #fff; 
+            padding: 1em; 
+            border-radius: 8px; 
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+            margin-bottom: 2em; /* 차트 간 간격 */
+        }
+        #stats-container { 
+            display: flex; 
+            gap: 20px; 
+            flex-wrap: wrap; 
+        }
+        .stats-box { 
+            flex: 1; 
+            min-width: 200px; 
+            background-color: #fff; 
+            border: 1px solid #ddd; 
+            padding: 15px; 
+            border-radius: 8px; 
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05); 
+        }
+        .stats-box h2, .stats-box h3 { 
+            margin-top: 0; 
+            color: royalblue; 
+        }
+        .stats-box h2 { color: #555; }
+        .kpi { 
+            font-size: 1.4em; 
+            font-weight: bold; 
+            margin-bottom: 5px; 
+            color: #111; 
+        }
+        .label { 
+            font-size: 0.9em; 
+            color: #666; 
+        }
+        .mdd-kpi { color: #d9001b; }
+        
+        #ai-analysis-section { margin-top: 2em; }
+        #analyzeButton { background-color: royalblue; color: white; border: none; padding: 12px 20px; font-size: 1em; border-radius: 5px; cursor: pointer; transition: background-color 0.2s; }
+        #analyzeButton:hover { background-color: #3a5db0; }
+        #analyzeButton:disabled { background-color: #ccc; cursor: not-allowed; }
+        #ai-response-box { display: none; margin-top: 15px; background-color: #fff; border: 1px solid #ddd; border-left: 5px solid royalblue; padding: 1.5em; border-radius: 5px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+        #ai-response { white-space: pre-wrap; font-family: inherit; font-size: 1.05em; line-height: 1.6; color: #333; }
+        .typing::after { content: '▋ Woori-RisK_AI 분석 중'; animation: blink 1s step-end infinite; color: royalblue; }
+        @keyframes blink { 50% { opacity: 0; } }
+        
+        /* ⭐️ [삭제] 하락장 바 차트 컨테이너 스타일 (더 이상 필요 없음) */
+        /* #crash-charts-container {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            max-width: 1024px;
+        } 
+        */
+
+    </style>
+</head>
+<body>
+
+    <h1>📈 포트폴리오 월간 리밸런싱 백테스트</h1>
+    <p id="period-text">데이터 로딩 중...</p>
+    
+    <div id="stats-container">
+        <div class="stats-box">
+            <h3>나의 포트폴리오 (6:3:1)</h3>
+            <div id="stats-portfolio">
+                <div class="kpi" id="pf-value">-</div><div class="label">최종 자산</div>
+                <div class="kpi" id="pf-cagr" style="margin-top: 10px;">-</div><div class="label">연평균 수익률 (CAGR)</div>
+                <div class="kpi mdd-kpi" id="pf-mdd" style="margin-top: 10px;">-</div><div class="label">최대 손실폭 (MDD)</div>
+            </div>
+        </div>
+        <div class="stats-box">
+            <h2>KOSPI (벤치마크)</h2>
+            <div id="stats-benchmark">
+                <div class="kpi" id="bm-value">-</div><div class="label">최종 자산</div>
+                <div class="kpi" id="bm-cagr" style="margin-top: 10px;">-</div><div class="label">연평균 수익률 (CAGR)</div>
+                <div class="kpi mdd-kpi" id="bm-mdd" style="margin-top: 10px;">-</div><div class="label">최대 손실폭 (MDD)</div>
+            </div>
+        </div>
+    </div>
+    
+    <hr style="border: 0; border-top: 1px solid #eee; margin: 2em 0;">
+    
+    <h2>누적 수익률 (전체 기간)</h2>
+    <div id="chart-container" class="chart-container">
+        <canvas id="backtestChart"></canvas>
+    </div>
+
+    <div id="crash-analysis-section">
+        <h2>📉 내 포트폴리오는 급락장을 잘 버틸 수 있을까?</h2>
+        
+        <select id="crash-period-select" style="margin-bottom: 1em; padding: 8px; font-size: 1em; border-radius: 5px;">
+            </select>
+        
+        <div id="crash-chart-box" class="stats-box" style="max-width: 600px; margin: 0;">
+            <canvas id="singleCrashChartCanvas"></canvas> </div>
+    </div>
+    <div id="ai-analysis-section">
+        <h2>🤖 AI 자동 분석 리포트</h2>
+        <button id="analyzeButton" disabled>결과 로딩 중...</button>
+        <div id="ai-response-box">
+            <pre id="ai-response"></pre>
+        </div>
+    </div>
+
+    <script>
+        let evtSource = null;
+        const aiButton = document.getElementById('analyzeButton');
+        const aiBox = document.getElementById('ai-response-box');
+        const aiResponseArea = document.getElementById('ai-response');
+        
+        // ⭐️ [신규] 단일 차트 인스턴스와 데이터를 저장할 변수
+        let singleCrashChartInstance = null;
+        let allCrashPeriodData = []; // 백엔드에서 받은 하락장 데이터 원본
+
+        document.addEventListener('DOMContentLoaded', () => {
+            // 1. /api/backtest 호출 (모든 차트 데이터 로드)
+            fetch('http://127.0.0.1:5000/api/backtest')
+                .then(response => {
+                    if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
+                    return response.json();
+                })
+                .then(data => {
+                    // 2. 통계, 라인차트 그리기 (이전과 동일)
+                    updateStats(data.stats, data.portfolio_history); 
+                    renderChart(data.portfolio_history, data.benchmark_history);
+                    
+                    // ⭐️ [수정]
+                    // (1) 받은 데이터를 전역 변수에 저장
+                    allCrashPeriodData = data.crash_period_results;
+                    
+                    // (2) 드롭다운 설정
+                    setupCrashDropdown(allCrashPeriodData);
+                    
+                    // (3) 첫 번째 하락장 데이터로 차트 초기 렌더링
+                    if (allCrashPeriodData && allCrashPeriodData.length > 0) {
+                        renderSingleCrashChart(allCrashPeriodData[0]);
+                    } else {
+                        // ⭐️ 데이터가 없을 경우 캔버스 숨기기 등 예외 처리
+                        document.getElementById('crash-chart-box').style.display = 'none';
+                        console.warn("하락장 분석 데이터(crash_period_results)가 없습니다.");
+                    }
+
+                    // 3. AI 분석 버튼 활성화 (이전과 동일)
+                    aiButton.disabled = false;
+                    aiButton.textContent = "🤖 AI로 결과 분석하기";
+                })
+                .catch(error => {
+                    // 4. 오류 발생 시
+                    console.error('API 호출 오류:', error);
+                    const container = document.getElementById('stats-container');
+                    if (container) {
+                        container.innerHTML = `<h2>❌ 백엔드 연결 실패</h2><p style="color: red;">서버(app.py)가 실행 중이 아니거나 CSV 파일을 찾을 수 없습니다.</p><p>오류 메시지: ${error.message || error}</p>`;
+                    }
+                    aiButton.disabled = true;
+                });
+        });
+
+        // 5. AI 분석 버튼 클릭 (SSE 스트리밍 시작)
+        aiButton.addEventListener('click', () => {
+            if (evtSource) { evtSource.close(); }
+            aiButton.disabled = true;
+            aiButton.textContent = "AI가 분석 중입니다...";
+            aiBox.style.display = 'block';
+            aiResponseArea.innerHTML = ""; 
+            aiResponseArea.classList.add("typing"); 
+
+            evtSource = new EventSource('http://127.0.0.1:5000/api/analyze_stream');
+
+            evtSource.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                if (data.event === 'done') {
+                    evtSource.close(); 
+                    evtSource = null;
+                    aiButton.disabled = false;
+                    aiButton.textContent = "✅ 분석 완료 (다시 분석)";
+                    aiResponseArea.classList.remove("typing"); 
+                } 
+                else if (data.text) {
+                    aiResponseArea.innerHTML += data.text.replace(/\n/g, '<br>');
+                }
+            };
+            evtSource.onerror = (err) => {
+                console.error("EventSource failed:", err);
+                aiResponseArea.textContent = "AI 스트리밍 중 오류가 발생했습니다. (백엔드 로그 확인)";
+                aiResponseArea.classList.remove("typing");
+                evtSource.close();
+                evtSource = null;
+                aiButton.disabled = false;
+                aiButton.textContent = "🤖 분석 재시도";
+            };
+        });
+
+        // 6. 통계(KPI) 업데이트 함수
+        function updateStats(stats, portfolio_history) {
+            const portfolio = stats.portfolio;
+            const benchmark = stats.benchmark;
+            const formatCurrency = (val) => `₩${Math.round(val).toLocaleString()}`;
+            const formatPercent = (val) => `${(val * 100).toFixed(2)}%`;
+            const periodEl = document.getElementById('period-text');
+            if (periodEl && portfolio_history && portfolio_history.length > 0) {
+                periodEl.textContent = 
+                    `테스트 기간: ${portfolio_history[0].date} ~ ${portfolio_history[portfolio_history.length - 1].date}`;
+            }
+            document.getElementById('pf-value').textContent = formatCurrency(portfolio['Final Value']);
+            document.getElementById('pf-cagr').textContent = formatPercent(portfolio.CAGR);
+            document.getElementById('pf-mdd').textContent = formatPercent(portfolio.MDD);
+            document.getElementById('bm-value').textContent = formatCurrency(benchmark['Final Value']);
+            document.getElementById('bm-cagr').textContent = formatPercent(benchmark.CAGR);
+            document.getElementById('bm-mdd').textContent = formatPercent(benchmark.MDD);
+        }
+        
+        // 7. 메인 라인 차트 렌더링 함수 (음영 처리 제거됨)
+        function renderChart(portfolioData, benchmarkData) {
+            const ctx = document.getElementById('backtestChart').getContext('2d');
+            const labels = portfolioData.map(item => item.date);
+
+            new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        { label: '나의 포트폴리오 (월간 리밸런싱)', data: portfolioData.map(item => item.value), borderColor: 'royalblue', borderWidth: 3, fill: false, pointRadius: 0 },
+                        { label: 'KOSPI (Buy & Hold)', data: benchmarkData.map(item => item.value), borderColor: 'gray', borderWidth: 2, borderDash: [5, 5], fill: false, pointRadius: 0 }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    hover: { mode: 'index', intersect: false },
+                    plugins: { 
+                        tooltip: { mode: 'index', intersect: false }
+                        // Annotation 플러그인 설정 제거됨
+                    },
+                    scales: {
+                        x: { type: 'time', time: { unit: 'month', tooltipFormat: 'yyyy-MM-dd' } },
+                        y: { ticks: { callback: (value) => value.toLocaleString() } }
+                    }
+                }
+            });
+        }
+
+        // 8. ⭐️ --- [신규] 드롭다운 설정 함수 --- ⭐️
+        function setupCrashDropdown(crashPeriods) {
+            const selectElement = document.getElementById('crash-period-select');
+            
+            // 1. 드롭다운 옵션 채우기
+            if (!crashPeriods || crashPeriods.length === 0) {
+                selectElement.disabled = true;
+                const option = document.createElement('option');
+                option.textContent = "분석 가능한 하락장이 없습니다.";
+                selectElement.appendChild(option);
+                return;
+            }
+
+            crashPeriods.forEach((period, index) => {
+                const option = document.createElement('option');
+                option.value = index; // ⭐️ 옵션의 값으로 데이터의 인덱스를 사용
+                option.textContent = `${period.name} (${period.start_date} ~ ${period.end_date})`;
+                selectElement.appendChild(option);
+            });
+
+            // 2. 드롭다운에 'change' 이벤트 리스너 추가
+            selectElement.addEventListener('change', (event) => {
+                const selectedIndex = event.target.value; // 선택된 <option>의 value (인덱스)
+                const selectedPeriodData = allCrashPeriodData[selectedIndex];
+                
+                // ⭐️ 선택된 데이터로 차트 업데이트
+                renderSingleCrashChart(selectedPeriodData);
+            });
+        }
+
+        // 9. ⭐️ --- [신규] 단일 하락장 바 차트 렌더링/업데이트 함수 --- ⭐️
+        function renderSingleCrashChart(period) {
+            if (!period) return; // 데이터가 없으면 실행 중지
+            
+            const ctx = document.getElementById('singleCrashChartCanvas').getContext('2d');
+
+            // 1. 차트용 데이터 준비
+            const pfReturn = (period.portfolio_return || 0) * 100;
+            const bmReturn = (period.benchmark_return || 0) * 100;
+            const chartTitle = `${period.name} (${period.start_date} ~ ${period.end_date})`;
+            
+            // 2. ⭐️ 차트 인스턴스가 이미 존재하는지 확인
+            if (singleCrashChartInstance) {
+                // 2a. 존재하면: 데이터와 제목만 업데이트
+                singleCrashChartInstance.data.datasets[0].data = [pfReturn, bmReturn];
+                singleCrashChartInstance.options.plugins.title.text = chartTitle;
+                singleCrashChartInstance.update();
+            } else {
+                // 2b. 존재하지 않으면 (최초 1회): 새 차트 생성
+                singleCrashChartInstance = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: ['나의 포트폴리오', 'KOSPI'],
+                        datasets: [{
+                            label: '수익률 (%)',
+                            data: [pfReturn, bmReturn],
+                            backgroundColor: [
+                                'rgba(54, 162, 235, 0.7)', // 포트폴리오 (파랑)
+                                'rgba(201, 203, 207, 0.7)'  // KOSPI (회색)
+                            ],
+                            borderColor: [
+                                'rgb(54, 162, 235)',
+                                'rgb(201, 203, 207)'
+                            ],
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: {
+                            title: {
+                                display: true,
+                                text: chartTitle, // ⭐️ 동적 제목
+                                font: { size: 14 }
+                            },
+                            legend: { display: false }, // 범례 숨기기
+                            tooltip: { // ⭐️ 툴팁 콜백 (v3+ 방식)
+                                callbacks: {
+                                    label: (tooltipItem) => {
+                                        // tooltipItem.raw에서 숫자 값을 가져옵니다.
+                                        const value = (typeof tooltipItem.raw === 'number') ? tooltipItem.raw : 0;
+                                        return `${value.toFixed(2)}%`;
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            y: {
+                                title: { display: true, text: '수익률 (%)' },
+                                ticks: {
+                                    callback: (value) => `${value.toFixed(1)}%`
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+        }
+    </script>
+</body>
+</html>

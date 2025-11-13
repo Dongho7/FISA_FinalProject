@@ -1,0 +1,489 @@
+<!-- <!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>BigFinance Heatmap (Canvas)</title>
+    <!-- D3.js v7 라이브러리 -->
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        /* 1. 전체 테마 (다크 모드) */
+        body { 
+            font-family: 'Malgun Gothic', '맑은 고딕', sans-serif; 
+            margin: 0; 
+            background-color: #1a1a1a; 
+            color: #f0f0f0;
+            overflow: hidden; 
+        }
+        .chart-title { 
+            text-align: center; 
+            margin: 20px 0; 
+            font-size: 24px; 
+            font-weight: bold; 
+        }
+        
+        /* 캔버스 컨테이너 */
+        #chart-container {
+            position: relative;
+            /* 뷰포트 높이에서 타이틀 영역(60px)만큼 뺌 */
+            height: calc(100vh - 60px); 
+        }
+
+        /* 캔버스 (메인/오버레이) */
+        #heatmap-canvas, #overlay-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: block; /* 캔버스 기본 여백 제거 */
+        }
+        #heatmap-canvas {
+            background-color: #1a1a1a;
+            cursor: move; 
+            z-index: 1;
+        }
+        #overlay-canvas {
+            background-color: transparent;
+            z-index: 10; /* 마우스 이벤트를 받아야 하므로 위에 위치 */
+        }
+
+
+        /* 3. 텍스트 스타일 (Canvas에서 그리므로 참조용) */
+        .sector-label {
+            pointer-events: none;
+            fill: #f0f0f0;
+            font-size: 14px;
+            font-weight: bold;
+        }
+
+        /* 4. 고급 툴팁 스타일 (500px) */
+        #tooltip {
+            position: absolute; 
+            opacity: 0; 
+            pointer-events: none; 
+            background: rgba(20, 20, 20, 0.95);
+            color: #f0f0f0; 
+            padding: 12px; 
+            border-radius: 5px; 
+            border: 1px solid #444;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5); 
+            font-size: 14px;
+            line-height: 1.6; 
+            transition: opacity 0.1s;
+            width: 350px; /* 500px -> 350px */
+            height: auto; 
+            z-index: 20;
+        }
+        .tooltip-sector-title {
+            font-size: 16px;
+            font-weight: bold;
+            color: #fff;
+            border-bottom: 1px solid #444;
+            padding-bottom: 5px;
+            margin-bottom: 5px;
+        }
+        .tooltip-stock-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 6px 4px; 
+            border-radius: 3px;
+        }
+        .tooltip-stock-row.highlighted {
+            background-color: #2a3a4f;
+            border-left: 2px solid #3c82f6;
+            padding-left: 2px;
+            font-weight: bold;
+        }
+        /* 4열 레이아웃 (350px 너비 재조정) */
+        .stock-name { flex-basis: 100px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } /* 150px -> 100px */
+        .stock-price { flex-basis: 80px; text-align: right; color: #ccc; } /* 100px -> 80px */
+        .stock-change { flex-basis: 70px; text-align: right; } /* 80px -> 70px */
+        .stock-sparkline { flex-basis: 80px; } /* 150px -> 80px */
+        
+        .stock-change.positive { color: #12A158; }
+        .stock-change.negative { color: #E73439; }
+        .stock-change.zero { color: #777; }
+
+        /* 5. 스파크라인 차트 스타일 */
+        .sparkline-svg {
+            display: block;
+        }
+        .sparkline {
+            fill: none;
+            stroke-width: 1.5;
+        }
+        .sparkline.positive { stroke: #12A158; }
+        .sparkline.negative { stroke: #E73439; }
+        .sparkline.zero { stroke: #777; }
+    </style>
+</head>
+<body>
+
+    <div class="chart-title">KOSPI 200 업종별 히트맵 (Canvas)</div>
+
+    <div id="tooltip"></div>
+
+    <div id="chart-container">
+        <!-- 메인 캔버스 (차트 그림) -->
+        <canvas id="heatmap-canvas"></canvas>
+        <!-- 오버레이 캔버스 (마우스 이벤트 감지) -->
+        <canvas id="overlay-canvas"></canvas>
+    </div>
+
+    <script>
+        // --- 1. 초기 설정 ---
+        const container = d3.select("#chart-container");
+        const tooltip = d3.select("#tooltip");
+        
+        const mainCanvas = d3.select("#heatmap-canvas").node();
+        const mainCtx = mainCanvas.getContext("2d");
+        const overlayCanvas = d3.select("#overlay-canvas").node();
+        // (Overlay Context는 사용하지 않으므로 굳이 가져올 필요 없음)
+
+        const dpr = window.devicePixelRatio || 1;
+        let width, height;
+
+        let rootNode; // D3 계층 데이터
+        let flatDataStore = []; // 원본 JSON 데이터
+        let currentTransform = d3.zoomIdentity;
+        let currentTarget = null; // 현재 마우스가 올라간 종목
+        
+        const colorScale = d3.scaleLinear()
+            .domain([-3, -2, -1, 0, 1, 2, 3])
+            .range(["#E73439", "#C9171E", "#A61216", "#32373E", "#0C5A31", "#0F7E44", "#12A158"]) 
+            .clamp(true);
+
+        // --- 2. 캔버스 리사이즈 및 HiDPI 설정 ---
+        function setCanvasSize() {
+            width = container.node().clientWidth;
+            height = container.node().clientHeight;
+            
+            if (width === 0 || height === 0) return; // 컨테이너가 숨겨져 있으면 중단
+
+            // CSS 크기 설정 (브라우저가 보는 크기)
+            mainCanvas.style.width = width + "px";
+            mainCanvas.style.height = height + "px";
+            overlayCanvas.style.width = width + "px";
+            overlayCanvas.style.height = height + "px";
+
+            // 실제 픽셀 크기 설정 (고해상도 지원)
+            mainCanvas.width = Math.floor(width * dpr);
+            mainCanvas.height = Math.floor(height * dpr);
+            overlayCanvas.width = Math.floor(width * dpr);
+            overlayCanvas.height = Math.floor(height * dpr);
+        }
+
+        // --- 3. D3 줌/팬 기능 설정 ---
+        function handleZoom(event) {
+            currentTransform = event.transform;
+            draw(); // 줌/팬 발생 시 캔버스 다시 그리기
+            hideTooltip(); // 줌/팬 중에는 툴팁 숨기기
+        }
+        const zoom = d3.zoom()
+            .scaleExtent([0.5, 10])
+            .on("zoom", handleZoom);
+        
+        // 마우스 이벤트는 투명한 오버레이 캔버스에서만 감지
+        d3.select(overlayCanvas).call(zoom);
+
+        // --- 4. 유틸리티 함수 ---
+        const formatMarketCap = (cap) => {
+            if (cap >= 1e12) return (cap / 1e12).toFixed(1) + "조";
+            if (cap >= 1e8) return (cap / 1e8).toFixed(0) + "억";
+            return cap.toLocaleString() + " 원";
+        };
+        const getChangeClass = (change) => {
+            if (change > 0) return 'positive';
+            if (change < 0) return 'negative';
+            return 'zero';
+        };
+        // 동적 폰트 크기 계산 (사용자 설정값)
+        function calculateNameFontSize(d) {
+            const width = d.x1 - d.x0;
+            const height = d.y1 - d.y0;
+            const size = Math.min(width / 6, height / 2.5); 
+            return Math.max(8, Math.min(size, 24)); // 최소 8px, 최대 24px
+        }
+
+        // --- 5. 메인 그리기 함수 (Canvas) ---
+        function draw() {
+            if (!rootNode) return; 
+
+            mainCtx.save(); // (A) 현재 상태 저장 (줌/팬 변환 전)
+            
+            // 캔버스 초기화 (HiDPI 스케일링 전)
+            mainCtx.clearRect(0, 0, mainCanvas.width, mainCanvas.height);
+            
+            // HiDPI 스케일 적용
+            mainCtx.scale(dpr, dpr);
+            
+            // 줌/팬 변환 적용
+            mainCtx.translate(currentTransform.x, currentTransform.y);
+            mainCtx.scale(currentTransform.k, currentTransform.k);
+
+            // 텍스트 가시성 임계값
+            const widthThreshold = 30; // 사용자 설정값
+            const heightThreshold = 30; // 사용자 설정값
+
+            // 1. 사각형 그리기
+            rootNode.leaves().forEach(d => {
+                const w = d.x1 - d.x0;
+                const h = d.y1 - d.y0;
+                mainCtx.fillStyle = colorScale(d.data.change_rate);
+                mainCtx.fillRect(d.x0, d.y0, w, h);
+            });
+            
+            // 2. 텍스트 그리기 (사각형과 분리해야 텍스트가 위로 옴)
+            rootNode.leaves().forEach(d => {
+                const w = d.x1 - d.x0;
+                const h = d.y1 - d.y0;
+
+                // 줌 레벨에 따른 가시성 체크
+                const visibleWidth = w * currentTransform.k;
+                const visibleHeight = h * currentTransform.k;
+
+                if (visibleWidth > widthThreshold && visibleHeight > heightThreshold) {
+                    mainCtx.save(); // (B) 텍스트별 상태 저장 (클리핑 전)
+                    
+                    // 텍스트가 상자 밖으로 나가지 않도록 클리핑
+                    mainCtx.beginPath();
+                    mainCtx.rect(d.x0, d.y0, w, h);
+                    mainCtx.clip(); 
+
+                    mainCtx.fillStyle = "#ffffff";
+                    mainCtx.textAlign = "center";
+                    mainCtx.textBaseline = "middle";
+
+                    const fontSize = calculateNameFontSize(d);
+                    const x = d.x0 + w / 2;
+                    const y = d.y0 + h / 2;
+
+                    // 6글자 ... 처리
+                    let name = d.data.name;
+                    if (name.length > 6) {
+                        name = name.substring(0, 5) + "...";
+                    }
+                    
+                    // 줄 1: 종목명
+                    mainCtx.font = `bold ${fontSize}px 'Malgun Gothic'`;
+                    mainCtx.fillText(name, x, y - (fontSize * 0.1));
+
+                    // 줄 2: 등락율
+                    const changeText = (d.data.change_rate > 0 ? '+' : '') + d.data.change_rate + '%';
+                    mainCtx.font = `bold ${fontSize * 0.8}px 'Malgun Gothic'`;
+                    mainCtx.fillText(changeText, x, y + (fontSize * 0.9));
+                    
+                    mainCtx.restore(); // (B) 클리핑 영역 해제
+                }
+            });
+            
+            // 3. 섹터(업종)명 그리기
+            mainCtx.fillStyle = "#f0f0f0";
+            mainCtx.font = "bold 14px 'Malgun Gothic'";
+            mainCtx.textAlign = "left";
+            mainCtx.textBaseline = "top";
+
+            rootNode.children.forEach(c => {
+                mainCtx.fillText(c.data.name, c.x0 + 5, c.y0 + 5);
+            });
+            
+            mainCtx.restore(); // (A) 줌/팬 변환 해제
+        }
+
+        // --- 6. 마우스 이벤트 핸들러 ---
+
+        // (x, y) 좌표로 어떤 종목인지 찾기
+        function findCompanyAtCursor(mx, my) {
+            if (!rootNode) return null;
+            
+            // HiDPI 보정된 캔버스 좌표(mx, my)를 줌/팬 변환 이전의 데이터 좌표로 역산
+            const [invertedX, invertedY] = currentTransform.invert([mx / dpr, my / dpr]);
+
+            return rootNode.leaves().find(d => {
+                return invertedX >= d.x0 && invertedX <= d.x1 &&
+                       invertedY >= d.y0 && invertedY <= d.y1;
+            });
+        }
+
+        // 툴팁 숨기기
+        function hideTooltip() {
+            tooltip.style("opacity", 0);
+            currentTarget = null;
+        }
+
+        // 툴팁 위치 조정 (화면 오버플로우 방지)
+        function moveTooltip(pageX, pageY) {
+            const tooltipWidth = 500; // CSS의 툴팁 너비와 일치
+            const margin = 15;
+            let left = pageX + margin;
+            let top = pageY + margin;
+
+            // 툴팁의 예상 높이 (대략 10줄 * 25px)
+            const tooltipHeight = 300; 
+            
+            // 화면 오른쪽 밖으로 나갈 때
+            if (left + tooltipWidth > window.innerWidth) {
+                left = pageX - tooltipWidth - margin;
+            }
+            // 화면 아래쪽 밖으로 나갈 때
+            if (pageY + tooltipHeight > window.innerHeight) {
+                top = pageY - tooltipHeight - margin; // 마우스 위로
+            }
+            
+            tooltip
+                .style("left", left + "px")
+                .style("top", top + "px");
+        }
+        
+        // [핵심] 고급 툴팁 그리기
+        function renderAdvancedTooltip(target) {
+            const data = target.data;
+            const sector = data.sector;
+            
+            // 1. 동일 섹터 Top 10 찾기
+            const peers = flatDataStore
+                .filter(d => d.sector === sector)
+                .sort((a, b) => b.market_cap - a.market_cap)
+                .slice(0, 10);
+            
+            // 2. 툴팁 HTML 생성
+            let html = `<div class="tooltip-sector-title">${sector}</div>`;
+            peers.forEach(peer => {
+                const changeClass = getChangeClass(peer.change_rate);
+                const changeSign = peer.change_rate > 0 ? '+' : '';
+                const highlighted = (peer.symbol === data.symbol) ? "highlighted" : "";
+                
+                html += `
+                    <div class="tooltip-stock-row ${highlighted}">
+                        <div class="stock-name" title="${peer.name}">${peer.name}</div>
+                        <div class="stock-price">${(peer.price || 0).toLocaleString()}</div>
+                        <div class="stock-change ${changeClass}">${changeSign}${peer.change_rate}%</div>
+                        <div class="stock-sparkline" id="sparkline-${peer.symbol}"></div>
+                    </div>
+                `;
+            });
+            
+            tooltip.html(html);
+
+            // 3. 10개의 스파크라인 차트 그리기
+            peers.forEach(peer => {
+                // history가 [오늘, 어제, ...] 순이므로 reverse()로 [과거, ... 오늘]로 뒤집음
+                const historyData = (peer.history && peer.history.length > 1) 
+                                    ? peer.history.slice().reverse()
+                                    : [];
+                
+                if (historyData.length > 0) {
+                    drawSparkline(historyData, `#sparkline-${peer.symbol}`, getChangeClass(peer.change_rate));
+                }
+            });
+        }
+        
+        // 스파크라인 차트 그리기 함수 (D3 사용)
+        function drawSparkline(historyData, selector, changeClass) {
+            const chartWidth = 150; // CSS .stock-sparkline flex-basis와 일치
+            const chartHeight = 40; // 툴팁 높이
+            
+            const chartSvg = d3.select(selector).append("svg")
+                .attr("class", "sparkline-svg")
+                .attr("width", chartWidth)
+                .attr("height", chartHeight)
+                .attr("viewBox", `0 0 ${chartWidth} ${chartHeight}`); // 반응형 SVG
+
+            const xScale = d3.scaleLinear().domain([0, historyData.length - 1]).range([0, chartWidth]);
+            const yScale = d3.scaleLinear().domain(d3.extent(historyData)).range([chartHeight - 4, 4]); // 4px 여백
+            const line = d3.line().x((d, i) => xScale(i)).y(d => yScale(d));
+
+            chartSvg.append("path")
+                .datum(historyData)
+                .attr("class", `sparkline ${changeClass}`)
+                .attr("d", line);
+        }
+
+        // 메인 마우스 이벤트 리스너 (오버레이 캔버스)
+        d3.select(overlayCanvas).on("mousemove", function(event) {
+            const [mx, my] = d3.pointer(event); // 캔버스 기준 마우스 좌표 (HiDPI 적용됨)
+            const target = findCompanyAtCursor(mx, my);
+            
+            if (target) {
+                // 새 종목으로 이동한 경우에만 툴팁 내용 다시 그리기 (성능 최적화)
+                if (target !== currentTarget) {
+                    currentTarget = target;
+                    renderAdvancedTooltip(target);
+                }
+                tooltip.style("opacity", 1);
+                moveTooltip(event.pageX, event.pageY); // 페이지 기준 마우스 좌표
+
+            } else {
+                hideTooltip();
+            }
+        });
+        
+        d3.select(overlayCanvas).on("mouseout", hideTooltip);
+
+        // --- 7. 초기화 및 데이터 로드 ---
+        function initialize() {
+            setCanvasSize(); 
+            
+            // 통합 데이터 파일 로드
+            d3.json("heatmap_complete_data.json").then(data => {
+                flatDataStore = data; 
+                
+                const groupedBySector = d3.group(flatDataStore, d => d.sector);
+                const hierarchyData = {
+                    name: "Total Market",
+                    children: Array.from(groupedBySector, ([sectorName, stocks]) => ({
+                        name: (sectorName === 'N/A' ? '기타' : sectorName),
+                        children: stocks 
+                    }))
+                };
+                
+                rootNode = d3.hierarchy(hierarchyData)
+                    .sum(d => d.market_cap)
+                    .sort((a, b) => b.value - a.value);
+
+                // D3 Treemap 레이아웃 계산
+                d3.treemap()
+                    .size([width, height])
+                    .paddingInner(1.3) // 사용자 설정값
+                    .paddingOuter(5)   // 사용자 설정값
+                    .paddingTop(18)    // 사용자 설정값
+                    (rootNode);
+                
+                // 첫 그리기!
+                draw();
+
+            }).catch(error => {
+                // HiDPI를 고려하여 오류 메시지 그리기
+                mainCtx.save();
+                mainCtx.scale(dpr, dpr); 
+                mainCtx.fillStyle = "red";
+                mainCtx.font = "bold 16px 'Malgun Gothic'";
+                mainCtx.textAlign = "center";
+                mainCtx.fillText(`데이터 로드 오류: ${error.message}. 'heatmap_complete_data.json'을(를) 확인하세요.`, width / 2, height / 2);
+                mainCtx.restore();
+            });
+        }
+
+        // 창 크기 변경 시 다시 그리기
+        window.addEventListener('resize', () => {
+            setCanvasSize();
+            // rootNode가 로드된 경우에만 레이아웃 재계산
+            if (rootNode) { 
+                d3.treemap()
+                    .size([width, height])
+                    .paddingInner(1.3)
+                    .paddingOuter(5)
+                    .paddingTop(18)
+                    (rootNode);
+            }
+            draw();
+        });
+
+        // 시작!
+        initialize();
+
+    </script>
+
+</body>
+</html> -->

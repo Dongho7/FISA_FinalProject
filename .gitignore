@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.env
+.vscode/
+.DS_Store
+node_modules/
+dist/
+build/
+*.log
+coverage/
+.idea/
+*.swp
+visualization_practice/processed_data

@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>BigFinance Heatmap (Final)</title>
+    <!-- D3.js v7 라이브러리 -->
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        /* 1. 전체 테마 (다크 모드) */
+        body { 
+            font-family: 'Malgun Gothic', '맑은 고딕', sans-serif; 
+            margin: 0; 
+            background-color: #1a1a1a; 
+            color: #f0f0f0;
+            overflow: hidden; 
+        }
+        .chart-title { 
+            text-align: center; 
+            margin: 20px 0; 
+            font-size: 24px; 
+            font-weight: bold; 
+        }
+        #heatmap-chart {
+            background-color: #1a1a1a;
+            cursor: move; 
+        }
+
+        /* 2. 사각형 (종목) */
+        rect {
+            stroke: none;
+        }
+        rect:hover {
+            opacity: 0.8;
+        }
+
+        /* 3. 텍스트 스타일 */
+        .stock-label-name, .stock-label-change {
+            pointer-events: none;
+            fill: #ffffff; 
+            font-weight: bold;
+            text-anchor: middle;
+        }
+        
+        .sector-label {
+            pointer-events: none;
+            fill: #f0f0f0;
+            font-size: 14px;
+            font-weight: bold;
+        }
+
+        /* 4. 다크 모드 툴팁 (너비 고정) */
+        #tooltip {
+            position: absolute; opacity: 0; pointer-events: none; background: rgba(10, 10, 10, 0.9);
+            color: #f0f0f0; padding: 10px; border-radius: 5px; border: 1px solid #555;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.3); font-size: 12px; line-height: 1.6; transition: opacity 0.2s;
+            width: 180px; /* 차트를 위해 너비 고정 */
+        }
+        .tooltip-name { font-weight: bold; font-size: 14px; margin-bottom: 5px; }
+        .tooltip-sector { color: #aaa; }
+        .tooltip-change { font-weight: bold; }
+        .tooltip-change.positive { color: #5CB85C; }
+        .tooltip-change.negative { color: #D9534F; }
+        .tooltip-change.zero { color: #CCCCCC; }
+
+        /* 5. 스파크라인 차트 스타일 */
+        #sparkline-chart {
+            margin-top: 8px;
+        }
+        #sparkline-chart svg {
+            display: block;
+            margin: 0 auto;
+        }
+        #sparkline-chart .sparkline {
+            fill: none;
+            stroke-width: 1.5;
+        }
+        #sparkline-chart .sparkline.positive { stroke: #5CB85C; }
+        #sparkline-chart .sparkline.negative { stroke: #D9534F; }
+        #sparkline-chart .sparkline.zero { stroke: #CCCCCC; }
+
+    </style>
+</head>
+<body>
+
+    <div class="chart-title">KOSPI 200 업종별 히트맵</div>
+
+    <div id="tooltip"></div>
+
+    <div id="chart-container">
+        <svg id="heatmap-chart"></svg>
+    </div>
+
+    <script>
+        // --- 1. 초기 설정 ---
+        const width = window.innerWidth;
+        const height = window.innerHeight - 80;
+
+        const tooltip = d3.select("#tooltip");
+        const svg = d3.select("#heatmap-chart")
+            .attr("width", width)
+            .attr("height", height);
+
+        const chartGroup = svg.append("g");
+        let currentZoomK = 1; 
+
+        // --- 2. 줌/팬 기능 설정 ---
+        function handleZoom(event) {
+            chartGroup.attr("transform", event.transform);
+            currentZoomK = event.transform.k;
+            updateTextVisibility(currentZoomK); 
+        }
+
+        const zoom = d3.zoom()
+            .scaleExtent([0.5, 10])
+            .on("zoom", handleZoom);
+        
+        svg.call(zoom);
+
+        // --- 3. 유틸리티 함수 ---
+        const formatMarketCap = (cap) => {
+            if (cap >= 1e12) return (cap / 1e12).toFixed(1) + "조 원";
+            if (cap >= 1e8) return (cap / 1e8).toFixed(0) + "억 원";
+            return cap.toLocaleString() + " 원";
+        };
+        const getChangeClass = (change) => {
+            if (change > 0) return 'positive';
+            if (change < 0) return 'negative';
+            return 'zero';
+        };
+
+        // 텍스트 가시성 업데이트 (사용자 설정값 30, 30 유지)
+        function updateTextVisibility(k) {
+            const widthThreshold = 30; 
+            const heightThreshold = 30;
+
+            chartGroup.selectAll(".stock-text-group")
+                .each(function(d) {
+                    const textGroup = d3.select(this);
+                    const rectWidth = d.x1 - d.x0;
+                    const rectHeight = d.y1 - d.y0;
+                    const visibleWidth = rectWidth * k; 
+                    const visibleHeight = rectHeight * k;
+                    
+                    if (visibleWidth > widthThreshold && visibleHeight > heightThreshold) {
+                        textGroup.style("display", "block");
+                    } else {
+                        textGroup.style("display", "none");
+                    }
+                });
+        }
+        
+        // 동적 폰트 크기 계산 함수 (사용자 설정값 8, 24 유지)
+        function calculateNameFontSize(d) {
+            const width = d.x1 - d.x0;
+            const height = d.y1 - d.y0;
+            const size = Math.min(width / 6, height / 2.5); 
+            return Math.max(8, Math.min(size, 24)); // 최소 8px
+        }
+
+        // --- 4. D3.js 데이터 로드 (통합 파일) ---
+        d3.json("heatmap_complete_data.json").then(flatData => {
+            
+            // 2. 데이터 계층 구조로 변환
+            const groupedBySector = d3.group(flatData, d => d.sector);
+            const rootNode = {
+                name: "Total Market",
+                children: Array.from(groupedBySector, ([sectorName, stocks]) => ({
+                    name: (sectorName === 'N/A' ? '기타' : sectorName),
+                    children: stocks // 'history'가 포함된 stocks
+                }))
+            };
+
+            // 3. Treemap 레이아웃 설정 (사용자 설정값 1.3, 5, 18 유지)
+            const root = d3.hierarchy(rootNode)
+                .sum(d => d.market_cap)
+                .sort((a, b) => b.value - a.value);
+
+            d3.treemap()
+                .size([width, height])
+                .paddingInner(1.3)  // 1.3px 구분선
+                .paddingOuter(5)    // 5px 업종 간격
+                .paddingTop(18)     // 18px 업종명 공간
+                (root);
+
+            // 4. 색상 스케일 (사용자 지정 7-Point)
+            const colorScale = d3.scaleLinear()
+                .domain([-3, -2, -1, 0, 1, 2, 3])
+                .range([
+                    "#E73439", "#C9171E", "#A61216", 
+                    "#32373E", 
+                    "#0C5A31", "#0F7E44", "#12A158"
+                ]) 
+                .clamp(true);
+
+            // 5. 개별 종목 그룹(g) 생성
+            const node = chartGroup.selectAll("g")
+                .data(root.leaves())
+                .enter().append("g")
+                .attr("transform", d => `translate(${d.x0},${d.y0})`);
+
+            // 6. 사각형(rect) 그리기 (스파크라인 차트 로직 추가)
+            node.append("rect")
+                .attr("width", d => d.x1 - d.x0)
+                .attr("height", d => d.y1 - d.y0)
+                .style("fill", d => colorScale(d.data.change_rate))
+                .on("mouseover", (event, d) => { 
+                    tooltip.transition().duration(200).style("opacity", 1);
+                })
+                .on("mousemove", (event, d) => {
+                    const data = d.data;
+                    const changeClass = getChangeClass(data.change_rate);
+                    const changeSign = data.change_rate > 0 ? '+' : '';
+                    
+                    // 툴팁 HTML (차트 div 추가)
+                    tooltip.html(`
+                        <div class="tooltip-name">${data.name} (${data.symbol})</div>
+                        <div class="tooltip-sector">${data.sector}</div>
+                        <div>시가총액: ${formatMarketCap(data.market_cap)}</div>
+                        <div class="tooltip-change ${changeClass}">등락율: ${changeSign}${data.change_rate}%</div>
+                        <div id="sparkline-chart"></div> 
+                    `);
+                    
+                    // === [수정됨] 데이터를 뒤집어서 차트 그리기 ===
+                    // .slice()로 원본 배열을 복사한 뒤 .reverse()로 뒤집습니다.
+                    // (원본 훼손 방지)
+                    const historyData = (data.history && data.history.length > 1) 
+                                        ? data.history.slice().reverse() 
+                                        : [];
+
+                    // 스파크라인 차트 그리기
+                    if (historyData.length > 0) {
+                        const chartWidth = 170; 
+                        const chartHeight = 40;
+                        
+                        const chartSvg = d3.select("#sparkline-chart")
+                            .append("svg")
+                            .attr("width", chartWidth)
+                            .attr("height", chartHeight);
+
+                        // X축 (인덱스 0 -> 29)
+                        const xScale = d3.scaleLinear()
+                            .domain([0, historyData.length - 1]) // [과거 -> 현재]
+                            .range([0, chartWidth]);
+                        
+                        // Y축 (최저가, 최고가)
+                        const yScale = d3.scaleLinear()
+                            .domain(d3.extent(historyData)) 
+                            .range([chartHeight - 2, 2]); 
+
+                        const line = d3.line()
+                            .x((d, i) => xScale(i))
+                            .y(d => yScale(d));
+
+                        chartSvg.append("path")
+                            .datum(historyData) // 뒤집힌 데이터 [과거, ..., 현재]
+                            .attr("class", `sparkline ${changeClass}`) 
+                            .attr("d", line);
+                    }
+                    
+                    // 툴팁 위치 조정
+                    tooltip
+                        .style("left", (event.pageX + 15) + "px")
+                        .style("top", (event.pageY + 15) + "px");
+                })
+                .on("mouseout", (event, d) => {
+                    tooltip.transition().duration(200).style("opacity", 0);
+                });
+            
+            // 7. 텍스트 클리핑 영역 정의
+            node.append("clipPath")
+                .attr("id", d => `clip-${d.data.symbol}`)
+                .append("rect")
+                .attr("width", d => d.x1 - d.x0)
+                .attr("height", d => d.y1 - d.y0);
+
+            // 8. 텍스트를 담을 그룹 생성 (클리핑 적용)
+            const textGroup = node.append("g")
+                .attr("class", "stock-text-group")
+                .attr("clip-path", d => `url(#clip-${d.data.symbol})`);
+
+            // 9. 텍스트 2줄 (6글자 ... 처리)
+            textGroup.append("text")
+                .attr("class", "stock-label-name")
+                .text(d => {
+                    const name = d.data.name;
+                    if (name.length > 6) {
+                        return name.substring(0, 5) + "...";
+                    }
+                    return name;
+                })
+                .attr("x", d => (d.x1 - d.x0) / 2)
+                .attr("y", d => {
+                    const y_center = (d.y1 - d.y0) / 2;
+                    const fontSize = calculateNameFontSize(d);
+                    return y_center - (fontSize * 0.1);
+                })
+                .attr("font-size", d => calculateNameFontSize(d) + 'px');
+
+            textGroup.append("text")
+                .attr("class", "stock-label-change")
+                .text(d => (d.data.change_rate > 0 ? '+' : '') + d.data.change_rate + '%')
+                .attr("x", d => (d.x1 - d.x0) / 2)
+                .attr("y", d => {
+                    const y_center = (d.y1 - d.y0) / 2;
+                    const fontSize = calculateNameFontSize(d);
+                    return y_center + (fontSize * 0.9);
+                })
+                .attr("font-size", d => (calculateNameFontSize(d) * 0.8) + 'px');
+            
+            // 10. 섹터(업종)명 텍스트
+            chartGroup.selectAll(".sector-label")
+                .data(root.children)
+                .enter().append("text")
+                .attr("class", "sector-label")
+                .attr("x", d => d.x0 + 5)
+                .attr("y", d => d.y0 + 13)
+                .text(d => d.data.name);
+
+            // 11. 초기 로드 시 텍스트 가시성 한번 체크
+            updateTextVisibility(1); 
+
+        }).catch(error => {
+            svg.append("text")
+                .attr("x", width / 2)
+                .attr("y", height / 2)
+                .attr("text-anchor", "middle")
+                .text(`데이터 로드 오류: ${error.message}. 'heatmap_complete_data.json'을 확인하세요.`)
+                .style("fill", "red")
+                .style("font-size", "16px");
+        });
+
+    </script>
+
+</body>
+</html>

@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>기업 재무 현황 시각화</title>
+    <style>
+        /* 차트가 깨지지 않게 크기 조절 */
+        .chart-container {
+            width: 80%;
+            max-width: 900px;
+            margin: 20px auto;
+        }
+    </style>
+</head>
+
+<body>
+    
+    <h1>기업 분기별 주요 손익 (2016~2025)</h1>
+    <div class="chart-container">
+        <canvas id="revenueChart"></canvas>
+    </div>
+
+    <h2>기업 매출 구성 비중</h2>
+    <div class="chart-container">
+        <canvas id="revenueRatioChart"></canvas>
+    </div>
+
+    <h2>기업 이자보상배율 (ICR)</h2>
+    <div class="chart-container">
+        <canvas id="icrChart"></canvas>
+    </div>
+
+    <h2>기업 분기별 당기순이익</h2>
+    <div class="chart-container">
+        <canvas id="netIncomeChart"></canvas> </div>
+
+    <h2>기업 성장성 지표 (YoY)</h2>
+    <div class="chart-container">
+        <canvas id="growthChart"></canvas> 
+    </div>
+
+    <h2>기업 안정성 지표</h2>
+    <div class="chart-container">
+        <canvas id="stabilityChart"></canvas> 
+    </div>
+
+    <h2>기업 EPS/DPS 및 배당성향</h2>
+    <div class="chart-container">
+        <canvas id="dividendSummaryChart"></canvas> 
+    </div>
+
+    <h2>기업 현금흐름표 (TTM)</h2>
+    <div class="chart-container">
+        <canvas id="cashFlowChart"></canvas> 
+    </div>
+
+    <h2>기업 CAPEX 및 현금흐름 (TTM)</h2>
+    <div class="chart-container">
+        <canvas id="capexCashFlowTTMChart"></canvas>
+    </div>
+
+    <h2>기업 자산의 구성 (재무상태표)</h2>
+    <div class="chart-container">
+        <canvas id="balanceSheetChart"></canvas>
+    </div>
+
+    <h2>기업 자본의 구성 (재무상태표)</h2>
+    <div class="chart-container">
+        <canvas id="equityChart"></canvas>
+    </div>
+
+    <h2>기업 부채의 구성 (재무상태표)</h2>
+    <div class="chart-container">
+        <canvas id="liabilitiesChart"></canvas>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="app2.js"></script>
+</body>
+</html>

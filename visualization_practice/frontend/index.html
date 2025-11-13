@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>삼성전자 재무 차트</title>
+    <style>
+        /* 차트가 깨지지 않게 크기 조절 */
+        .chart-container {
+            width: 80%;
+            max-width: 900px;
+            margin: 20px auto;
+        }
+    </style>
+</head>
+
+<body>
+    
+    <h1>삼성전자 분기별 주요 손익 (2016~2025)</h1>
+    <div class="chart-container">
+        <canvas id="revenueChart"></canvas>
+    </div>
+
+    <h2>삼성전자 매출 구성 비중</h2>
+    <div class="chart-container">
+        <canvas id="revenueRatioChart"></canvas>
+    </div>
+
+    <h2>삼성전자 이자보상배율 (ICR)</h2>
+    <div class="chart-container">
+        <canvas id="icrChart"></canvas>
+    </div>
+
+    <h2>삼성전자 분기별 당기순이익</h2>
+    <div class="chart-container">
+        <canvas id="netIncomeChart"></canvas> </div>
+
+    <!-- <h2>삼성전자 ROE (자기자본이익률)</h2>
+    <div class="chart-container">
+        <canvas id="roeChart"></canvas> </div> -->
+
+    <h2>삼성전자 성장성 지표 (YoY)</h2>
+    <div class="chart-container">
+        <canvas id="growthChart"></canvas> 
+    </div>
+
+    <h2>삼성전자 안정성 지표</h2>
+    <div class="chart-container">
+        <canvas id="stabilityChart"></canvas> 
+    </div>
+
+    <h2>삼성전자 EPS/DPS</h2>
+    <div class="chart-container">
+        <canvas id="epsDpsChart"></canvas> 
+    </div>
+
+    <h2>삼성전자 현금흐름표</h2>
+    <div class="chart-container">
+        <canvas id="cashFlowChart"></canvas> 
+    </div>
+
+    <h2>삼성전자 CAPEX 및 현금흐름 (TTM)</h2>
+    <div class="chart-container">
+        <canvas id="capexCashFlowTTMChart"></canvas>
+    </div>
+
+    <h2>삼성전자 자산의 구성 (재무상태표)</h2>
+    <div class="chart-container">
+        <canvas id="balanceSheetChart"></canvas>
+    </div>
+
+    <h2>삼성전자 자본의 구성 (재무상태표)</h2>
+    <div class="chart-container">
+        <canvas id="equityChart"></canvas>
+    </div>
+
+    <h2>삼성전자 부채의 구성 (재무상태표)</h2>
+    <div class="chart-container">
+        <canvas id="liabilitiesChart"></canvas>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
